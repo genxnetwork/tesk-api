@@ -169,30 +169,38 @@ public class TesKubernetesConverter {
      * @return - executor K8s job object. To be placed in taskMaster input JSON map in the list of executors
      */
     public V1Job fromTesExecutorToK8sJob(String generatedTaskId, String tesTaskName, TesExecutor executor, int executorIndex, TesResources resources, User user) {
-        //get new template executor Job object
+        // Obtain a new template job object for the executor
         V1Job job = executorTemplateSupplier.get();
-        //set executors name based on taskmaster's job name
-        new Job(job).changeJobName(new Task(generatedTaskId).getExecutorName(executorIndex));
-        //put arbitrary labels and annotations:
-        //the important one --> taskId - to search for executors of a given task
+        // Set the executor's name based on the taskmaster's job name and executor index
+        String executorName = generatedTaskId + "-ex-" + String.format("%02d", executorIndex);
+        new Job(job).changeJobName(executorName);
+        // Add labels and annotations
         job.getMetadata().putLabelsItem(LABEL_TESTASK_ID_KEY, generatedTaskId);
         job.getMetadata().putLabelsItem(LABEL_EXECNO_KEY, Integer.valueOf(executorIndex).toString());
         job.getMetadata().putAnnotationsItem(ANN_TESTASK_NAME_KEY, tesTaskName);
         job.getMetadata().putLabelsItem(LABEL_USERID_KEY, user.getUsername());
         V1Container container = job.getSpec().getTemplate().getSpec().getContainers().get(0);
-        //Tries to convert potential TRS URI into docker image. If conversion unsuccessful -> leaves the original image value.
         container.image(this.trsClient.getDockerImageForToolVersionURI(executor.getImage()));
-        //Should we map executor's command to job container's command (==ENTRYPOINT) or job container's args (==CMD)?
-        //It will be command == ENTRYPOINT, because of shell requirement and no custom entrypoints in bio tools.
+        // If the executor has a dockerRegistry, add imagePullSecrets
+        if (executor.getDockerRegistry() != null && !executor.getDockerRegistry().isEmpty()) {
+            V1LocalObjectReference imagePullSecret = new V1LocalObjectReference();
+            // Use executorName for identifying the secret
+            imagePullSecret.setName(executorName);
+            job.getSpec().getTemplate().getSpec().setImagePullSecrets(Arrays.asList(imagePullSecret));
+        }
+        // Decide whether to map executor's command to job container's command (==ENTRYPOINT) or to container's args (==CMD)
+        // It will be mapped to command == ENTRYPOINT, due to the requirement for a shell and the absence of custom entrypoints in bio tools
         new ExecutorCommandWrapper(executor).getCommandsWithStreamRedirects().forEach(container::addCommandItem);
+        // If there are environment variables, add them to the container
         if (executor.getEnv() != null) {
             executor.getEnv().forEach((key, value) -> container.addEnvItem(new V1EnvVar().name(key).value(value)));
         }
+        // Set the working directory for the container
         container.setWorkingDir(executor.getWorkdir());
+        // Optional: map CPU cores request, limit decimal places to a specific precision
         Optional.ofNullable(resources).map(TesResources::getCpuCores).ifPresent(cpuCores -> container.getResources().putRequestsItem(RESOURCE_CPU_KEY, new QuantityFormatter().parse(cpuCores.toString())));
-	// Limit number of decimals to 6
-	Optional.ofNullable(resources).map(TesResources::getRamGb).ifPresent(ramGb -> container.getResources().putRequestsItem(RESOURCE_MEM_KEY, new QuantityFormatter().parse(String.format("%.6f",ramGb)+RESOURCE_MEM_UNIT)));
-
+        // Optional: map RAM request, limit number of decimals to 6
+        Optional.ofNullable(resources).map(TesResources::getRamGb).ifPresent(ramGb -> container.getResources().putRequestsItem(RESOURCE_MEM_KEY, new QuantityFormatter().parse(String.format("%.6f", ramGb) + RESOURCE_MEM_UNIT)));
         return job;
     }
 

@@ -29,6 +29,15 @@ public class TesExecutor   {
 
   @JsonProperty("workdir")
   private String workdir;
+  
+  @JsonProperty("docker_registry")
+  private String dockerRegistry;
+
+  @JsonProperty("docker_login")
+  private String dockerLogin;
+
+  @JsonProperty("docker_pass")
+  private String dockerPass;
 
   @JsonProperty("stdin")
   private String stdin;
@@ -75,6 +84,32 @@ public class TesExecutor   {
     }
     this.command.add(commandItem);
     return this;
+  }
+
+  @ApiModelProperty(value = "The Docker registry URL.", required = false)
+  public String getDockerRegistry() {
+    return dockerRegistry;
+  }
+
+  public void setDockerRegistry(String dockerRegistry) {
+    this.dockerRegistry = dockerRegistry;
+  }
+
+  @ApiModelProperty(value = "The login for Docker registry.", required = false)
+  public String getDockerLogin() {
+    return dockerLogin;
+  }
+
+  public void setDockerLogin(String dockerLogin) {
+    this.dockerLogin = dockerLogin;
+  }
+
+  @ApiModelProperty(value = "The password for Docker registry.", required = false)
+  public String getDockerPass() {
+    return dockerPass;
+  }
+  public void setDockerPass(String dockerPass) {
+    this.dockerPass = dockerPass;
   }
 
   /**
@@ -191,7 +226,6 @@ public class TesExecutor   {
    * @return env
   */
   @ApiModelProperty(example = "{\"BLASTDB\":\"/data/GRC38\",\"HMMERDB\":\"/data/hmmer\"}", value = "Enviromental variables to set within the container. Example: ``` {   \"env\" : {     \"ENV_CONFIG_PATH\" : \"/data/config.file\",     \"BLASTDB\" : \"/data/GRC38\",     \"HMMERDB\" : \"/data/hmmer\"   } } ```")
-
 
   public Map<String, String> getEnv() {
     return env;

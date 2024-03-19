@@ -4,6 +4,7 @@ import io.kubernetes.client.openapi.models.V1Job;
 import io.kubernetes.client.openapi.models.V1ConfigMap;
 import io.kubernetes.client.openapi.models.V1JobList;
 import io.kubernetes.client.openapi.models.V1PodList;
+import io.kubernetes.client.openapi.models.V1Secret;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,7 +14,6 @@ import uk.ac.ebi.tsc.tesk.k8s.exception.KubernetesException;
 import uk.ac.ebi.tsc.tesk.tes.model.*;
 import uk.ac.ebi.tsc.tesk.k8s.service.KubernetesClientWrapper;
 import uk.ac.ebi.tsc.tesk.k8s.convert.TesKubernetesConverter;
-import uk.ac.ebi.tsc.tesk.tes.model.TaskView;
 import uk.ac.ebi.tsc.tesk.k8s.convert.data.*;
 
 import java.util.List;
@@ -50,38 +50,57 @@ public class TesServiceImpl implements TesService {
      */
     @Override
     public TesCreateTaskResponse createTask(TesTask task, User user) {
-
         int attemptsNo = 0;
         while (true) {
             try {
-
                 TesResources resources = task.getResources();
-
-                if (resources != null && resources.getRamGb()!= null) {
+                // Ensure the task has the minimum required RAM
+                if (resources != null && resources.getRamGb() != null) {
                     Double minimumRamGb = this.kubernetesClientWrapper.minimumRamGb();
+                    // If the specified RAM is less than the minimum, set it to the minimum
                     if (resources.getRamGb() < minimumRamGb) {
                         resources.setRamGb(minimumRamGb);
                         task.setResources(resources);
                     }
                 }
-
+                // Convert the TES task to a Kubernetes job
                 V1Job taskMasterJob = this.converter.fromTesTaskToK8sJob(task, user);
-		V1ConfigMap taskMasterConfigMap = this.converter.fromTesTaskToK8sConfigMap(task, user, taskMasterJob);
-		V1ConfigMap createdConfigMap = this.kubernetesClientWrapper.createConfigMap(taskMasterConfigMap);
+                // Convert the TES task to a Kubernetes ConfigMap
+                V1ConfigMap taskMasterConfigMap = this.converter.fromTesTaskToK8sConfigMap(task, user, taskMasterJob);
+                // Create the ConfigMap in Kubernetes
+                V1ConfigMap createdConfigMap = this.kubernetesClientWrapper.createConfigMap(taskMasterConfigMap);
+                // Create secrets for each executor if a dockerRegistry is specified
+                for (int i = 0; i < task.getExecutors().size(); i++) {
+                    TesExecutor executor = task.getExecutors().get(i);
+                    if (executor.getDockerRegistry() != null && !executor.getDockerRegistry().isEmpty()) {
+                        String jobName = taskMasterJob.getMetadata().getName() + "-ex-" + String.format("%02d", i);
+                        // Create a Docker registry secret with the job name
+                        V1Secret createdSecret = this.kubernetesClientWrapper.createDockerRegistrySecret(
+                            jobName,
+                            executor.getDockerRegistry(),
+                            executor.getDockerLogin(),
+                            executor.getDockerPass()
+                        );
+                    }
+                }
+                // Create the job in Kubernetes
                 V1Job createdJob = this.kubernetesClientWrapper.createJob(taskMasterJob);
+                // Convert the Kubernetes job to a TES task response
                 return this.converter.fromK8sJobToTesCreateTaskResponse(createdJob);
             } catch (KubernetesException e) {
-                //in case of job name collision retry converting task to job (with new generated name) and creating the job
+                // Retry on duplicate object name, up to a maximum number of attempts
                 if (!e.isObjectNameDuplicated() || ++attemptsNo >= JOB_CREATE_ATTEMPTS_NO) {
                     throw e;
                 }
             } catch (Exception exc) {
+                // Log any other exceptions and re-throw
                 logger.error("ERROR: In createTask", exc);
-                logger.error(exc.getMessage());
                 throw exc;
             }
         }
     }
+
+      
 
     /**
      * Gets single task's details based on ID.
